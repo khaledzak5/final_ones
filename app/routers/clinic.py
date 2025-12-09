@@ -1445,9 +1445,9 @@ def visit_create(
 
         final_notes = extras if (extras and not notes_base) else (f"{extras}\n{notes_base}" if extras else notes_base)
 
-        # الإدراج
+        # الإدراج مباشرة مع استرجاع المعرّف
         if ptype == "T":
-            db.execute(text("""
+            last_visit = db.execute(text("""
                 INSERT INTO clinic_patients
                 (patient_type, trainee_no, national_id, full_name, mobile, major, college,
                 record_kind, visit_at,
@@ -1460,7 +1460,7 @@ def visit_create(
                 :temp, :bps, :bpd, :pulse, :resp,
                 :wkg, :hcm, :bmi, :glu, :o2, :chronic,
                 :complaint, :diagnosis, :rec, :rec_detail, :rest_days, :rec_json, :notes, :rx_json, :uid)
-            """), {
+            """ + ("" if is_sqlite() else " RETURNING id")), {
                 "no": pno, "nid": profile.get("national_id"), "name": profile.get("full_name"),
                 "mobile": profile.get("mobile"), "major": profile.get("major"), "college": profile.get("college"),
                 "temp": temp_f, "bps": bps, "bpd": bpd, "pulse": pulse_i, "resp": resp_i,
@@ -1470,7 +1470,7 @@ def visit_create(
                 "notes": final_notes, "rx_json": rx_payload, "uid": uid,
             })
         else:
-            db.execute(text("""
+            last_visit = db.execute(text("""
                 INSERT INTO clinic_patients
                 (patient_type, employee_no, national_id, full_name, mobile,
                 record_kind, visit_at,
@@ -1483,7 +1483,7 @@ def visit_create(
                  :temp, :bps, :bpd, :pulse, :resp,
                  :wkg, :hcm, :bmi, :glu, :o2, :chronic,
                  :complaint, :diagnosis, :rec, :rec_detail, :rest_days, :rec_json, :notes, :rx_json, :uid)
-            """), {
+            """ + ("" if is_sqlite() else " RETURNING id")), {
                 "no": pno, "nid": profile.get("national_id"), "name": profile.get("full_name"),
                 "mobile": profile.get("mobile"),
                 "temp": temp_f, "bps": bps, "bpd": bpd, "pulse": pulse_i, "resp": resp_i,
@@ -1493,25 +1493,23 @@ def visit_create(
                 "notes": final_notes, "rx_json": rx_payload, "uid": uid,
             })
 
-        db.commit()
-        
         # الحصول على معرّف الزيارة المُنشأة للتو
-        # استخدم آخر INSERT ID
         if is_sqlite():
-            last_visit = db.execute(text("""
+            # SQLite: استخدم last_insert_rowid() قبل الـ commit
+            db.commit()
+            visit_id_result = db.execute(text("""
                 SELECT last_insert_rowid() as id
             """)).first()
-            visit_id = last_visit[0] if last_visit else None
+            visit_id = visit_id_result[0] if visit_id_result else None
         else:
-            # PostgreSQL: استخدم RETURNING id
-            last_visit = db.execute(text("""
-                SELECT id FROM clinic_patients
-                WHERE record_kind = 'visit' 
-                AND patient_type = :ptype 
-                AND (trainee_no = :pno OR employee_no = :pno)
-                ORDER BY visit_at DESC LIMIT 1
-            """), {"ptype": ptype, "pno": pno}).mappings().first()
-            visit_id = last_visit["id"] if last_visit else None
+            # PostgreSQL: استخرج الـ id من RETURNING
+            try:
+                visit_row = last_visit.fetchone()
+                visit_id = visit_row[0] if visit_row else None
+            except Exception:
+                # في حالة الخطأ، جرّب استخراج من آخر صف
+                visit_id = None
+            db.commit()
         
         # إرجاع JSON بدلاً من redirect – يحتوي على معرّف الزيارة للطباعة
         return JSONResponse({

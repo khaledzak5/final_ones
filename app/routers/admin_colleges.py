@@ -318,7 +318,9 @@ def college_update(
     item.name = name_n
     item.name_en = name_en_n
     item.name_print_ar = (name_print_ar_n or item.name_print_ar or name_n)
-    # تم حذف حقول العميد والوكلاء. التفعيل يعتمد فقط على اسم الكلية.
+    item.dean_name = dean_n
+    item.vp_students_name = vp_st_n
+    item.vp_trainers_name = vp_tr_n
     item.is_active = fields_complete(name_n) and (str(is_active).lower() in ("on", "1", "true", "yes"))
 
     # أي ملف يُرفع الآن يستبدل القديم (لو موجود)

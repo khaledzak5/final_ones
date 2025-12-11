@@ -211,13 +211,6 @@ def admin_departments(request: Request):
         {"request": request, "title": "إدارة الأقسام", "desc": "صفحة قيد الإنشاء."}
     )
 
-@router.get("/colleges", dependencies=[Depends(require_admin)])
-def admin_colleges(request: Request):
-    return templates.TemplateResponse(
-        "admin/placeholder.html",
-        {"request": request, "title": "إدارة الكليات", "desc": "صفحة قيد الإنشاء."}
-    )
-
 @router.get("/settings", dependencies=[Depends(require_admin)])
 def admin_settings(request: Request):
     return templates.TemplateResponse(

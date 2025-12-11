@@ -1173,28 +1173,87 @@ def visits_list(
     request: Request,
     user=Depends(require_doc),
     db: Session = Depends(get_db),
+    start_date: str = Query(None, description="Start date for filtering"),
+    end_date: str = Query(None, description="End date for filtering"),
+    chronic_disease: str = Query(None, description="Chronic disease filter"),
 ):
     visits = []
     
-    # جلب جميع الزيارات من جدول clinic_patients مرتبة بالتاريخ
+    # بناء استعلام SQL مع فلاتر
+    query = """
+        SELECT 
+            id,
+            trainee_no,
+            full_name,
+            record_kind,
+            college,
+            complaint,
+            diagnosis,
+            created_at,
+            visit_at,
+            chronic_json
+        FROM clinic_patients
+        WHERE record_kind = 'visit'
+    """
+    
+    params = {}
+    
+    # إضافة فلتر التاريخ
+    if start_date:
+        try:
+            # التحقق من صيغة التاريخ
+            from datetime import datetime
+            datetime.strptime(start_date, '%Y-%m-%d')
+            query += " AND visit_at >= :start_date"
+            params["start_date"] = start_date
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            # التحقق من صيغة التاريخ
+            from datetime import datetime
+            datetime.strptime(end_date, '%Y-%m-%d')
+            query += " AND visit_at <= :end_date"
+            params["end_date"] = end_date + " 23:59:59"  # لتضمين اليوم بالكامل
+        except ValueError:
+            pass
+    
+    # إضافة فلتر الأمراض المزمنة
+    if chronic_disease:
+        query += " AND chronic_json LIKE :chronic_disease"
+        params["chronic_disease"] = f"%{chronic_disease}%"
+    
+    query += " ORDER BY visit_at DESC NULLS LAST, created_at DESC"
+    
+    # جلب الزيارات من جدول clinic_patients مرتبة بالتاريخ
     try:
-        all_patients = db.execute(text("""
-            SELECT 
-                id,
-                trainee_no,
-                full_name,
-                record_kind,
-                college,
-                complaint,
-                diagnosis,
-                created_at,
-                visit_at
-            FROM clinic_patients
-            WHERE record_kind = 'visit'
-            ORDER BY visit_at DESC NULLS LAST, created_at DESC
-        """)).fetchall()
+        all_patients = db.execute(text(query), params).fetchall()
         
         for row in all_patients:
+            # معالجة بيانات الأمراض المزمنة
+            chronic_data = row[9]
+            print(f"=== CHRONIC DISEASE DEBUG ===")
+            print(f"Row ID: {row[0]}, Name: {row[2]}")
+            print(f"Raw chronic_data: {repr(chronic_data)}")
+            print(f"Type: {type(chronic_data)}")
+            
+            if isinstance(chronic_data, str) and chronic_data.strip():
+                try:
+                    parsed_data = json.loads(chronic_data)
+                    print(f"Parsed successfully: {repr(parsed_data)}")
+                    chronic_data = parsed_data
+                except (json.JSONDecodeError, Exception) as e:
+                    print(f"Failed to parse JSON: {e}")
+            elif chronic_data is None:
+                print("chronic_data is None")
+            elif chronic_data == '':
+                print("chronic_data is empty string")
+            else:
+                print(f"chronic_data is already processed: {repr(chronic_data)}")
+            
+            print("===========================")
+            
             visits.append({
                 "id": row[0],
                 "trainee_no": row[1],
@@ -1205,6 +1264,7 @@ def visits_list(
                 "diagnosis": row[6],
                 "created_at": row[7],
                 "visit_at": row[8],
+                "chronic_json": chronic_data,  # بيانات الأمراض المزمنة المعالجة
                 "source": "database"
             })
     except Exception as e:
@@ -1216,6 +1276,9 @@ def visits_list(
             "request": request,
             "visits": visits,
             "user": user,
+            "start_date": start_date,
+            "end_date": end_date,
+            "chronic_disease": chronic_disease,
         }
     )
 

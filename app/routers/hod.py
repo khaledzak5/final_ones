@@ -3,10 +3,11 @@ import os, tempfile, io, traceback
 from datetime import date, datetime
 from typing import List, Optional, Dict
 from urllib.parse import urlparse, unquote, quote
-from ..models import Course, CourseTargetDepartment, Department, College
+from ..models import Course, CourseTargetDepartment, Department, College, User
 from pathlib import Path
 import qrcode
 from app.services.settings import PUBLIC_BASE_URL
+from ..reports.skills_record_pdf_template import SKILLS_RECORD_PDF_HTML
 
 
 BARCODES_DIR = Path("app/static/barcodes")
@@ -57,6 +58,7 @@ tempfile.NamedTemporaryFile = _NamedTemporaryFile_forced
 # ---------------------------------------------------------------------
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query
+from fastapi import Path as FastAPIPath
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, and_, text
@@ -79,7 +81,7 @@ except Exception:
     _HAS_ARABIC_SHAPING = False
 
 from ..database import get_db
-from ..models import Course, CourseTargetDepartment, Department
+from ..models import Course, CourseTargetDepartment, Department, College, User
 from ..schemas import CourseCreate
 from ..deps_auth import require_hod_or_admin, require_user, CurrentUser
 
@@ -1616,69 +1618,274 @@ def skills_record(
     return templates.TemplateResponse("hod/skills_record.html", {"request": request})
 
 # ⚠️ يجب أن يأتي قبل /skills-record/report/{trainee_no} لأن FastAPI يطابق الترتيب الأول
-@router.get("/skills-record-pdf/{trainee_no}")
-def skills_record_export_pdf_v2(trainee_no: str, db: Session = Depends(get_db)):
-    """PDF export for trainee skills record - generates full report as PDF."""
-    # Simplified query
-    query_sql = f"SELECT DISTINCT e.trainee_no, e.trainee_name, c.id, c.title, c.description, c.hours, c.start_date, c.end_date, c.provider, cv.certificate_code, cv.copy_no, cv.created_at FROM course_enrollments e INNER JOIN courses c ON e.course_id = c.id LEFT JOIN certificate_verifications cv ON e.course_id = cv.course_id AND e.trainee_no = cv.trainee_no AND cv.copy_no = 1 WHERE e.trainee_no = '{trainee_no}' ORDER BY c.start_date DESC"
+
+@router.get("/skills-record/pdf/{trainee_no}")
+def skills_record_pdf_export(
+    trainee_no: str = FastAPIPath(...),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_hod_or_admin)
+):
+    """تصدير تقرير مهارات المتدرب كملف PDF احترافي"""
     
-    try:
-        results = db.execute(text(query_sql)).mappings().all()
-    except:
-        raise HTTPException(status_code=500, detail="Database query failed")
+    # If college_admin, only show records for their college's courses
+    if user.is_college_admin and user.college_admin_college:
+        college_name = user.college_admin_college
+        college_departments = db.query(Department).filter(Department.college == college_name).all()
+        dept_names = [d.name for d in college_departments]
+        
+        if not dept_names:
+            raise HTTPException(status_code=403, detail="لم يتم العثور على أقسام في كليتك")
+        
+        sql = """
+            SELECT DISTINCT
+                e.trainee_no,
+                e.trainee_name,
+                c.id as course_id,
+                c.title as course_title,
+                c.description,
+                c.hours,
+                c.start_date,
+                c.end_date,
+                c.provider,
+                cv.certificate_code,
+                cv.copy_no,
+                cv.created_at as certificate_date
+            FROM course_enrollments e
+            INNER JOIN courses c ON e.course_id = c.id
+            INNER JOIN course_target_departments ctd ON c.id = ctd.course_id
+            LEFT JOIN certificate_verifications cv ON 
+                e.course_id = cv.course_id AND 
+                e.trainee_no = cv.trainee_no AND
+                cv.copy_no = 1
+            WHERE e.trainee_no = :trainee_no AND ctd.department_name IN ({})
+            ORDER BY c.start_date DESC
+        """.format(','.join([f"'{d}'" for d in dept_names]))
+    else:
+        sql = """
+            SELECT DISTINCT
+                e.trainee_no,
+                e.trainee_name,
+                c.id as course_id,
+                c.title as course_title,
+                c.description,
+                c.hours,
+                c.start_date,
+                c.end_date,
+                c.provider,
+                cv.certificate_code,
+                cv.copy_no,
+                cv.created_at as certificate_date
+            FROM course_enrollments e
+            INNER JOIN courses c ON e.course_id = c.id
+            LEFT JOIN certificate_verifications cv ON 
+                e.course_id = cv.course_id AND 
+                e.trainee_no = cv.trainee_no AND
+                cv.copy_no = 1
+            WHERE e.trainee_no = :trainee_no
+            ORDER BY c.start_date DESC
+        """
+    
+    query = text(sql)
+    results = db.execute(query, {"trainee_no": trainee_no}).mappings().all()
     
     if not results:
-        raise HTTPException(status_code=404, detail="Trainee not found")
+        raise HTTPException(status_code=404, detail="لم يتم العثور على المتدرب")
     
-    # Build trainee info
+    # تجميع البيانات
     trainee_info = {
         "trainee_no": results[0]["trainee_no"],
         "trainee_name": results[0]["trainee_name"],
         "courses": [],
         "total_hours": 0,
         "total_certificates": 0,
-        "completed_courses": len(results)
+        "completed_courses": 0,
+        "department": None,
+        "college": None
     }
     
+    # البحث عن بيانات المتدرب (القسم والكلية)
+    # 1. محاولة البحث في جدول المستخدمين
+    trainee_user = db.query(User).filter(User.username == trainee_no).first()
+    if trainee_user:
+        # استخدام getattr لتجنب الأخطاء إذا لم تكن الحقول موجودة في Model
+        user_dept = getattr(trainee_user, 'department', None)
+        user_college = getattr(trainee_user, 'college', None)
+
+        if user_dept:
+            dept = db.query(Department).filter(Department.name == user_dept).first()
+            if dept:
+                trainee_info["department"] = dept.name
+                if dept.college:
+                    college = db.query(College).filter(College.name == dept.college).first()
+                    if college:
+                        trainee_info["college"] = college.name
+            else:
+                trainee_info["department"] = user_dept
+        
+        if not trainee_info["college"] and user_college:
+            college = db.query(College).filter(College.name == user_college).first()
+            if college:
+                trainee_info["college"] = college.name
+            else:
+                trainee_info["college"] = user_college
+
+    # 2. محاولة البحث في جدول التسجيلات (course_enrollments) إذا لم نجد البيانات
+    # هذا مفيد للمتدربين الذين ليس لديهم حساب مستخدم ولكن لديهم بيانات في التسجيل
+    if not trainee_info["department"]:
+        enrollment = db.execute(
+            text("SELECT trainee_major FROM course_enrollments WHERE trainee_no = :tno AND trainee_major IS NOT NULL LIMIT 1"),
+            {"tno": trainee_no}
+        ).mappings().first()
+        
+        if enrollment and enrollment["trainee_major"]:
+            major_str = enrollment["trainee_major"]
+            
+            # محاولة استخراج الكلية والقسم من النص (مثال: "قسم الحاسب - كلية التقنية")
+            if " - " in major_str:
+                parts = major_str.split(" - ")
+                if len(parts) >= 2:
+                    trainee_info["department"] = parts[0].strip()
+                    # نفترض أن الجزء الأخير هو الكلية
+                    possible_college = parts[-1].strip()
+                    if "كلية" in possible_college:
+                        trainee_info["college"] = possible_college
+            
+            # إذا لم يتم استخراج القسم (لم نجد " - ") نستخدم النص كاملاً
+            if not trainee_info["department"]:
+                trainee_info["department"] = major_str
+
+    # 3. محاولة استنتاج الكلية من القسم إذا وجدت
+    if trainee_info["department"] and not trainee_info["college"]:
+        dept = db.query(Department).filter(Department.name == trainee_info["department"]).first()
+        if dept and dept.college:
+            college = db.query(College).filter(College.name == dept.college).first()
+            trainee_info["college"] = college.name if college else dept.college
+    
     for row in results:
-        trainee_info["courses"].append({
-            "course_id": row["id"],
-            "course_title": row["title"],
-            "description": row["description"] or "",
-            "hours": float(row["hours"] or 0),
+        course_info = {
+            "course_id": row["course_id"],
+            "course_title": row["course_title"],
+            "description": row["description"],
+            "hours": row["hours"] or 0,
             "start_date": row["start_date"],
             "end_date": row["end_date"],
-            "provider": row["provider"] or "-",
+            "provider": row["provider"],
             "certificate_code": row["certificate_code"],
-            "certificate_date": row["created_at"]
-        })
-        trainee_info["total_hours"] += float(row["hours"] or 0)
+            "certificate_date": row["certificate_date"]
+        }
+        
+        trainee_info["courses"].append(course_info)
+        trainee_info["total_hours"] += course_info["hours"]
         if row["certificate_code"]:
             trainee_info["total_certificates"] += 1
+        trainee_info["completed_courses"] = len(trainee_info["courses"])
     
-    # Render template
+    # البحث عن اللوجو
+    logo_src = None
+    for p in ("images/main_logo.png", "images/favicon.ico", "images/logo.png", "img/logo.png"):
+        fp = Path("app/static").joinpath(p)
+        if fp.exists():
+            logo_src = f"/static/{p}"
+            break
+
+    # بناء الخطوط
+    font_url_majalla = None
+    for name in ["Majalla.ttf", "alfont_com_majalla.ttf"]:
+        p = Path("app/static/fonts") / name
+        if p.exists():
+            font_url_majalla = f"/static/fonts/{name}"
+            break
+
+    font_url_traditional = None
+    for name in ["Traditional-Arabic.ttf", "Traditional Arabic.ttf"]:
+        p = Path("app/static/fonts") / name
+        if p.exists():
+            font_url_traditional = f"/static/fonts/{name}"
+            break
+
+    parts = []
+    if font_url_majalla:
+        parts.append(f"@font-face {{ font-family:'MajallaAR'; src:url('{font_url_majalla}') format('truetype'); }}")
+    if font_url_traditional:
+        parts.append(f"@font-face {{ font-family:'TradArabicAR'; src:url('{font_url_traditional}') format('truetype'); }}")
+    font_ready_css = "\n".join(parts)
+
+    # الحصول على أسماء المسؤولين من بيانات الكلية والقسم
+    dean_name = ""
+    delegate_name = ""  # وكيل شؤون المتدربين
+    dept_head_name = ""
+    
+    # جلب بيانات الكلية للحصول على اسم العميد (admin الكلية) والوكيل
+    if trainee_info["college"]:
+        college = db.query(College).filter(College.name == trainee_info["college"]).first()
+        if college:
+            # جرب الحصول على اسم العميد من dean_name أولاً، ثم من admin الكلية
+            if college.dean_name:
+                dean_name = college.dean_name
+            else:
+                # ابحث عن admin الكلية
+                college_admin = db.query(User).filter(
+                    User.college_admin_college == college.name,
+                    User.is_college_admin == True
+                ).first()
+                if college_admin:
+                    dean_name = college_admin.full_name or college_admin.username
+            
+            delegate_name = college.vp_students_name or ""
+    
+    # جلب بيانات القسم للحصول على اسم رئيس القسم
+    if trainee_info["department"]:
+        dept = db.query(Department).filter(Department.name == trainee_info["department"]).first()
+        if dept:
+            # جرب الحصول على الاسم من المستخدم المرتبط أو من hod_name
+            if dept.head_user:
+                dept_head_name = dept.head_user.full_name or dept.head_user.username or ""
+            else:
+                dept_head_name = dept.hod_name or ""
+
+    # تحضير البيانات للـ template
+    payload = {
+        "trainee": trainee_info,
+        "logo_src": logo_src,
+        "generated_date": date.today().isoformat(),
+        "generated_by": user.full_name or user.username,
+        "dean_name": dean_name,
+        "delegate_name": delegate_name,
+        "dept_head_name": dept_head_name,
+        "font_ready_css": font_ready_css,
+        "shape": _shape_ar,
+    }
+
+    # تصيير الـ HTML
     try:
-        tpl = templates.env.get_template("hod/skills_record_report.html")
-        html = tpl.render(request=type('R', (), {'session': {}})(), trainee=trainee_info)
+        tpl = Template(SKILLS_RECORD_PDF_HTML)
+        html = tpl.render(**payload)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Template error: {str(e)}")
-    
-    # Generate PDF
+        raise HTTPException(status_code=500, detail=f"خطأ في إنشاء التقرير: {str(e)}")
+
+    # توليد PDF
     if not HAS_XHTML2PDF:
-        raise HTTPException(status_code=500, detail="PDF library not available")
-    
+        raise HTTPException(status_code=500, detail="مكتبة PDF غير متاحة")
+
     try:
         pdf_bytes = io.BytesIO()
         pisa.CreatePDF(html.encode('utf-8'), dest=pdf_bytes, link_callback=_link_callback)
         pdf_bytes.seek(0)
         
+        # Use RFC 2231 encoding for Arabic filename
+        filename_utf8 = f"تقرير_مهارات_{trainee_no}.pdf"
+        filename_encoded = filename_utf8.encode('utf-8')
+        filename_rfc2231 = f"UTF-8''{quote(filename_utf8)}"
+        
         return StreamingResponse(
             pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=report_{trainee_no}.pdf"}
+            headers={
+                "Content-Disposition": f"attachment; filename*={filename_rfc2231}; filename={trainee_no}_skills_report.pdf"
+            }
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في توليد PDF: {str(e)}")
 
 @router.get("/skills-record/report/{trainee_no}")
 def skills_record_report(
@@ -1762,8 +1969,62 @@ def skills_record_report(
         "courses": [],
         "total_hours": 0,
         "total_certificates": 0,
-        "completed_courses": 0
+        "completed_courses": 0,
+        "department": None,
+        "college": None
     }
+
+    # البحث عن بيانات المتدرب (القسم والكلية)
+    # 1. محاولة البحث في جدول المستخدمين
+    trainee_user = db.query(User).filter(User.username == trainee_no).first()
+    if trainee_user:
+        user_dept = getattr(trainee_user, 'department', None)
+        user_college = getattr(trainee_user, 'college', None)
+
+        if user_dept:
+            dept = db.query(Department).filter(Department.name == user_dept).first()
+            if dept:
+                trainee_info["department"] = dept.name
+                if dept.college:
+                    college = db.query(College).filter(College.name == dept.college).first()
+                    if college:
+                        trainee_info["college"] = college.name
+            else:
+                trainee_info["department"] = user_dept
+        
+        if not trainee_info["college"] and user_college:
+            college = db.query(College).filter(College.name == user_college).first()
+            if college:
+                trainee_info["college"] = college.name
+            else:
+                trainee_info["college"] = user_college
+
+    # 2. محاولة البحث في جدول التسجيلات (course_enrollments)
+    if not trainee_info["department"]:
+        enrollment = db.execute(
+            text("SELECT trainee_major FROM course_enrollments WHERE trainee_no = :tno AND trainee_major IS NOT NULL LIMIT 1"),
+            {"tno": trainee_no}
+        ).mappings().first()
+        
+        if enrollment and enrollment["trainee_major"]:
+            major_str = enrollment["trainee_major"]
+            if " - " in major_str:
+                parts = major_str.split(" - ")
+                if len(parts) >= 2:
+                    trainee_info["department"] = parts[0].strip()
+                    possible_college = parts[-1].strip()
+                    if "كلية" in possible_college:
+                        trainee_info["college"] = possible_college
+            
+            if not trainee_info["department"]:
+                trainee_info["department"] = major_str
+
+    # 3. محاولة استنتاج الكلية من القسم إذا وجدت
+    if trainee_info["department"] and not trainee_info["college"]:
+        dept = db.query(Department).filter(Department.name == trainee_info["department"]).first()
+        if dept and dept.college:
+            college = db.query(College).filter(College.name == dept.college).first()
+            trainee_info["college"] = college.name if college else dept.college
     
     for row in results:
         course_info = {

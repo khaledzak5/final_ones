@@ -53,4 +53,6 @@ def ilike_op(column: str) -> str:
         # في PostgreSQL، نستخدم ILIKE
         return f"{column} ILIKE :q"
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
 print("🔗 Using DB:", SQLALCHEMY_DATABASE_URL)

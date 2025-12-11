@@ -200,11 +200,11 @@
     <div class="card-footer bg-light">
       <div class="row">
         <div class="col-md-12">
-          <a href="/hod/skills-record/report/{{ trainee.trainee_no }}" class="btn btn-sm btn-warning" target="_blank">
-            <i class="fas fa-file-alt"></i> تقرير شامل
+          <a href="/hod/skills-record/pdf/{{ trainee.trainee_no }}" class="btn btn-sm btn-primary" target="_blank">
+            <i class="fas fa-file-pdf"></i> طباعة / تصدير كـ PDF
           </a>
-          <a href="/hod/skills-record-pdf/{{ trainee.trainee_no }}" class="btn btn-sm btn-primary" target="_blank" onclick="window.print(); return false;">
-            <i class="fas fa-print"></i> طباعة / تصدير PDF
+          <a href="/hod/skills-record/report/{{ trainee.trainee_no }}" class="btn btn-sm btn-secondary" target="_blank">
+            <i class="fas fa-file-alt"></i> تقرير شامل
           </a>
         </div>
       </div>

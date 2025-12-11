@@ -31,7 +31,7 @@
 
   <!-- بيانات المتدرب الأساسية -->
   <div class="row mb-4">
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card text-center border-0 shadow-sm">
         <div class="card-body">
           <h6 class="text-muted mb-2">رقم المتدرب</h6>
@@ -39,7 +39,31 @@
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
+      <div class="card text-center border-0 shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-2">اسم المتدرب</h6>
+          <h3 class="card-title">{{ trainee.trainee_name }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card text-center border-0 shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-2">القسم</h6>
+          <h3 class="card-title">{{ trainee.department or '-' }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card text-center border-0 shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-2">الكلية</h6>
+          <h3 class="card-title">{{ trainee.college or '-' }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
       <div class="card text-center border-0 shadow-sm">
         <div class="card-body">
           <h6 class="text-muted mb-2">عدد الدورات</h6>
@@ -47,19 +71,11 @@
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card text-center border-0 shadow-sm">
         <div class="card-body">
           <h6 class="text-muted mb-2">إجمالي الساعات</h6>
           <h3 class="card-title text-success">{{ trainee.total_hours }}</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card text-center border-0 shadow-sm">
-        <div class="card-body">
-          <h6 class="text-muted mb-2">الشهادات الصادرة</h6>
-          <h3 class="card-title text-info">{{ trainee.total_certificates }}/{{ trainee.completed_courses }}</h3>
         </div>
       </div>
     </div>
@@ -270,22 +286,9 @@
 
 <script>
   function exportToPDF() {
-    const element = document.querySelector('.container-fluid');
-    const opt = {
-      margin: 10,
-      filename: 'تقرير_{{ trainee.trainee_no }}_{{ trainee.trainee_name }}.pdf',
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { orientation: 'p', unit: 'mm', format: 'a4' }
-    };
-    
-    // تحميل html2pdf من CDN
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = function() {
-      html2pdf().set(opt).from(element).save();
-    };
-    document.head.appendChild(script);
+    // تحميل الـ PDF من الـ API الاحترافية
+    const trainee_no = '{{ trainee.trainee_no }}';
+    window.location.href = '/hod/skills-record/pdf/' + trainee_no;
   }
 </script>
 

@@ -53,7 +53,23 @@
       <div class="hint">اختياري، ويظهر في ترويسة الشهادة باللغة الإنجليزية.</div>
     </div>
 
-    <!-- تم حذف حقول العميد والوكلاء. يتم تعيينهم عند إنشاء المستخدم فقط. -->
+    <!-- المسؤولين -->
+    <h4 style="margin-top: 20px; margin-bottom: 12px; font-size: 1rem; color: #333;">المسؤولين</h4>
+    
+    <div class="field">
+      <label>اسم عميد الكلية
+        <input type="text" name="dean_name" id="f_dean" value="{{ item.dean_name if item and item.dean_name else '' }}" placeholder="مثال: أ.د. محمد علي">
+      </label>
+      <div class="hint">سيظهر على الشهادات كموقع عميد الكلية.</div>
+    </div>
+
+    <div class="field">
+      <label>اسم وكيل شؤون المتدربين
+        <input type="text" name="vp_students_name" id="f_vps" value="{{ item.vp_students_name if item and item.vp_students_name else '' }}" placeholder="مثال: أ.د. فاطمة محمود">
+      </label>
+      <div class="hint">سيظهر على الشهادات كموقع وكيل شؤون المتدربين.</div>
+    </div>
+
     <div class="row">
       <div class="field">
         <label class="actions" style="margin-top:28px;">
@@ -113,7 +129,7 @@
 </div>
 
 <script>
-  const req = ['f_name','f_dean','f_vps','f_vpt'].map(id=>document.getElementById(id));
+  const req = ['f_name','f_dean','f_vps'].map(id=>document.getElementById(id));
   const active = document.getElementById('f_active');
   function check() {
     const ok = req.every(x => x && x.value.trim().length > 0);

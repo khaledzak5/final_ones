@@ -12,6 +12,18 @@
 {% set departments = (departments if departments is defined else []) %}
 {% set filters = (filters if filters is defined else {'q':'','status_filter':'','department_id':'','date_from':'','date_to':''}) %}
 
+{% if request.query_params.get('closed') %}
+  <div class="alert alert-success" role="alert">
+    ✓ تم إغلاق الدورة بنجاح
+  </div>
+{% endif %}
+
+{% if request.query_params.get('reopened') %}
+  <div class="alert alert-success" role="alert">
+    ✓ تم إعادة فتح الدورة بنجاح
+  </div>
+{% endif %}
+
 <section class="card card-prestige">
   <div class="card-head">
     <div class="card-icon">🎓</div>
@@ -133,7 +145,7 @@
             <a class="btn btn-xs" href="/hod/certificates/issue?course_id={{ c.id }}">شهادات 🎖️</a>
             {% if c.status!='closed' %}
               <a class="btn btn-xs danger" href="/hod/courses/{{ c.id }}/close">إغلاق 🔒</a>
-            {% elif current_user.is_admin and c.status=='closed' %}
+            {% elif c.status=='closed' %}
               <a class="btn btn-xs warning" href="/hod/courses/{{ c.id }}/reopen">إعادة فتح 🔓</a>
             {% endif %}
           </td>

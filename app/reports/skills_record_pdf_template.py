@@ -179,26 +179,33 @@ SKILLS_RECORD_PDF_HTML = r"""<!doctype html>
           <span class="sig-title" style="font-size:11pt; font-weight:700;">{{ shape('وكيل شؤون المتدربين - ' + (delegate_name or '')) }}</span>
         </td>
         <td class="sig-cell">
-          <span class="sig-title" style="font-size:11pt; font-weight:700;">{{ shape('رئيس القسم - ' + (dept_head_name or '')) }}</span>
+          <span class="sig-title" style="font-size:11pt; font-weight:700;">{{ shape('الختم') }}</span>
         </td>
       </tr>
-      <tr>
-        <td class="sig-cell">
-          <div style="border-top:2px solid #2b2d31; display:block; height:50px; margin-top:15px;"></div>
+      <tr style="height: 85px;">
+        <td class="sig-cell" style="vertical-align: top; text-align: center; padding: 0 5px;">
+          {% if dean_sign_url and dean_sign_url != '/static/blank.png' %}
+            <img src="{{ dean_sign_url }}" alt="توقيع العميد" style="max-height: 70px; width: auto; display: inline-block; margin: 0 auto 0 auto;">
+          {% else %}
+            <div style="border-top:2px solid #2b2d31; display:block; height:50px; margin-top:15px;"></div>
+          {% endif %}
         </td>
-        <td class="sig-cell">
-          <div style="border-top:2px solid #2b2d31; display:block; height:50px; margin-top:15px;"></div>
+        <td class="sig-cell" style="vertical-align: top; text-align: center; padding: 0 5px;">
+          {% if vp_sign_url and vp_sign_url != '/static/blank.png' %}
+            <img src="{{ vp_sign_url }}" alt="توقيع الوكيل" style="max-height: 70px; width: auto; display: inline-block; margin: 0 auto 0 auto;">
+          {% else %}
+            <div style="border-top:2px solid #2b2d31; display:block; height:50px; margin-top:15px;"></div>
+          {% endif %}
         </td>
-        <td class="sig-cell">
-          <div style="border-top:2px solid #2b2d31; display:block; height:50px; margin-top:15px;"></div>
+        <td class="sig-cell" style="vertical-align: top; text-align: center; padding: 0 5px;">
+          {% if stamp_url and stamp_url != '/static/blank.png' %}
+            <img src="{{ stamp_url }}" alt="ختم شؤون المتدربين" style="max-height: 70px; width: auto; display: inline-block; margin: 0 auto 0 auto;">
+          {% else %}
+            <div style="border-top:2px solid #2b2d31; display:block; height:50px; margin-top:15px;"></div>
+          {% endif %}
         </td>
       </tr>
-      <tr style="margin-top:20px;">
-        <td class="sig-cell" style="height:60px; vertical-align:middle; border:1px dashed #c5d6de;">
-          <span class="sig-title">{{ shape('الختم') }}</span>
-        </td>
-        <td colspan="2" style="height:60px; vertical-align:middle; border:1px dashed #c5d6de;"></td>
-      </tr>
+
     </table>
     
     <div style="margin-top:30px; text-align:center;">

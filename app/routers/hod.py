@@ -727,9 +727,8 @@ def attendance_add_trainee(
         raise HTTPException(status_code=404, detail="الدورة غير موجودة")
     _assert_can_manage_course(user, course, db)
 
+    # الحصول على البيانات من ملف الإكسيل فقط
     stu = None
-    
-    # محاولة الحصول على البيانات من ملف الإكسيل أولاً
     try:
         import sys
         import os
@@ -740,13 +739,13 @@ def attendance_add_trainee(
         if student_data:
             stu = {
                 "student_id": student_data.get('student_id', trainee_no),
-                "student_name": student_data.get('student_Name', ''),
-                "major": student_data.get('Major', '')
+                "student_name": student_data.get('student_Name', '') or student_data.get('student_name', ''),
+                "major": student_data.get('Major', '') or student_data.get('major', '')
             }
-    except Exception:
-        stu = None
+    except Exception as e:
+        pass
     
-    # إذا لم نجد من الإكسيل، جرّب قاعدة البيانات
+    # إذا لم نجد من الإكسيل، حاول من جدول sf01 مباشرة
     if not stu:
         try:
             stu = db.execute(
@@ -759,9 +758,11 @@ def attendance_add_trainee(
         except Exception:
             stu = None
 
+    # إذا لم نجد المتدرب في أي مكان، ارجع خطأ
     if not stu:
-        # السماح بالإضافة بدون بيانات (إذا لم يكن الجدول موجود)
-        stu = {"student_id": trainee_no, "student_name": "", "major": ""}
+        error_msg = f"لا يوجد متدرب برقم {trainee_no} في قاعدة البيانات"
+        encoded_error = quote(error_msg, safe='')
+        return RedirectResponse(url=f"/hod/attendance/{course.id}?trainee_no={trainee_no}&error={encoded_error}", status_code=status.HTTP_303_SEE_OTHER)
 
     current_count = db.execute(text("SELECT COUNT(*) FROM course_enrollments WHERE course_id = :cid"), {"cid": course.id}).scalar() or 0
     if course.capacity and current_count >= course.capacity:
@@ -817,25 +818,59 @@ def enroll_manual_form(
     _assert_can_manage_course(user, course, db)
 
     student = None
+    error_message = None
     if trainee_no:
         try:
-            row = db.execute(
-                text("""
-                    SELECT student_id, COALESCE("student_Name", student_name) AS student_name,
-                           COALESCE("Major", major) AS major
-                    FROM sf01 WHERE student_id = :sid LIMIT 1
-                """),
-                {"sid": int(trainee_no)},
-            ).mappings().first()
-            if row:
-                student = dict(row)
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            from excel_data_reference import get_student_by_id
+            
+            student_data = get_student_by_id(trainee_no)
+            if student_data:
+                student = {
+                    "student_id": student_data.get('student_id', trainee_no),
+                    "student_name": student_data.get('student_Name', '') or student_data.get('student_name', ''),
+                    "major": student_data.get('Major', '') or student_data.get('major', '')
+                }
+            else:
+                # محاولة من جدول sf01 كحل بديل
+                try:
+                    row = db.execute(
+                        text("""
+                            SELECT student_id, COALESCE("student_Name", student_name) AS student_name,
+                                   COALESCE("Major", major) AS major
+                            FROM sf01 WHERE student_id = :sid LIMIT 1
+                        """),
+                        {"sid": int(trainee_no)},
+                    ).mappings().first()
+                    if row:
+                        student = dict(row)
+                    else:
+                        error_message = f"لا يوجد متدرب برقم {trainee_no} في قاعدة البيانات"
+                except Exception:
+                    error_message = f"لا يوجد متدرب برقم {trainee_no} في قاعدة البيانات"
         except Exception:
-            # جدول sf01 قد لا يكون موجود
-            student = None
+            # حاول من جدول sf01 مباشرة
+            try:
+                row = db.execute(
+                    text("""
+                        SELECT student_id, COALESCE("student_Name", student_name) AS student_name,
+                               COALESCE("Major", major) AS major
+                        FROM sf01 WHERE student_id = :sid LIMIT 1
+                    """),
+                    {"sid": int(trainee_no)},
+                ).mappings().first()
+                if row:
+                    student = dict(row)
+                else:
+                    error_message = f"لا يوجد متدرب برقم {trainee_no} في قاعدة البيانات"
+            except Exception:
+                error_message = f"لا يوجد متدرب برقم {trainee_no} في قاعدة البيانات"
 
     return templates.TemplateResponse(
         "hod/manual_enroll.html",
-        {"request": request, "current_user": user, "course": course, "trainee_no": trainee_no or "", "student": student},
+        {"request": request, "current_user": user, "course": course, "trainee_no": trainee_no or "", "student": student, "error_message": error_message},
     )
 
 @router.post("/courses/{course_id}/enroll-manual")
@@ -852,20 +887,36 @@ def enroll_manual_submit(
 
     stu = None
     try:
-        stu = db.execute(
-            text("""
-                SELECT student_id, "student_Name" AS student_name, "Major" AS major
-                FROM sf01 WHERE student_id = :sid LIMIT 1
-            """),
-            {"sid": int(trainee_no)},
-        ).mappings().first()
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        from excel_data_reference import get_student_by_id
+        
+        student_data = get_student_by_id(trainee_no)
+        if student_data:
+            stu = {
+                "student_id": student_data.get('student_id', trainee_no),
+                "student_name": student_data.get('student_Name', '') or student_data.get('student_name', ''),
+                "major": student_data.get('Major', '') or student_data.get('major', '')
+            }
     except Exception:
-        # جدول sf01 قد لا يكون موجود، سنسمح بالإضافة بدون البيانات الإضافية
-        stu = None
+        pass
     
     if not stu:
-        # السماح بالإضافة بدون بيانات من sf01 (إذا لم يكن الجدول موجود)
-        stu = {"student_id": trainee_no, "student_name": "", "major": ""}
+        try:
+            stu = db.execute(
+                text("""
+                    SELECT student_id, "student_Name" AS student_name, "Major" AS major
+                    FROM sf01 WHERE student_id = :sid LIMIT 1
+                """),
+                {"sid": int(trainee_no)},
+            ).mappings().first()
+        except Exception:
+            stu = None
+    
+    if not stu:
+        # إرجاع خطأ إذا لم يكن المتدرب موجود
+        raise HTTPException(status_code=400, detail=f"لا يوجد متدرب برقم {trainee_no} في قاعدة البيانات")
 
     current_count = db.execute(text("SELECT COUNT(*) FROM course_enrollments WHERE course_id = :cid"), {"cid": course.id}).scalar() or 0
     if course.capacity and current_count >= course.capacity:
@@ -1223,6 +1274,14 @@ def certificate_print(
     dean_sign_url = college.dean_sign_path       if college and getattr(college, "dean_sign_path", None)       else "/static/blank.png"
     stamp_url     = college.students_affairs_stamp_path if college and getattr(college, "students_affairs_stamp_path", None) else "/static/blank.png"
 
+    # البحث عن لوجو صالح داخل static/images
+    logo_src = None
+    for p in ("images/main_logo.png", "images/favicon.ico", "images/logo.png", "img/logo.png"):
+        fp = Path("app/static").joinpath(p)
+        if fp.exists():
+            logo_src = f"/static/{p}"
+            break
+
     # 6) التواريخ بصيغة يوم-شهر-سنة لنص القالب
     start_s = course.start_date.strftime("%d-%m-%Y") if course.start_date else ""
     end_s   = course.end_date.strftime("%d-%m-%Y")   if course.end_date else ""
@@ -1241,6 +1300,7 @@ def certificate_print(
             "vp_sign_url": vp_sign_url,
             "dean_sign_url": dean_sign_url,
             "stamp_url": stamp_url,
+            "logo_src": logo_src,
             "certificate_no": cert_code,
             "copy_no": copy_no,
             "barcode_url": barcode_url,
@@ -1584,18 +1644,17 @@ def reopen_course(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_hod_or_admin),
 ):
-    # ✅ الشرط: لازم يكون أدمن
-    if not user.is_admin:
-        raise HTTPException(403, "فقط الأدمن يمكنه إعادة فتح الدورة")
-
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(404, "الدورة غير موجودة")
 
+    # ✅ التحقق من الصلاحيات
+    _assert_can_manage_course(user, course, db)
+
     if course.status != "closed":
         raise HTTPException(400, "لا يمكن إعادة فتح إلا الدورات المغلقة")
 
-    course.status = "published"  # أو الحالة اللي تبيها بعد الفتح
+    course.status = "published"
     db.commit()
 
     return RedirectResponse(
@@ -1815,7 +1874,11 @@ def skills_record_pdf_export(
     delegate_name = ""  # وكيل شؤون المتدربين
     dept_head_name = ""
     
-    # جلب بيانات الكلية للحصول على اسم العميد (admin الكلية) والوكيل
+    # جلب بيانات الكلية للحصول على اسم العميد (admin الكلية) والوكيل والتوقيعات
+    dean_sign_url = "/static/blank.png"
+    vp_sign_url = "/static/blank.png"
+    stamp_url = "/static/blank.png"
+    
     if trainee_info["college"]:
         college = db.query(College).filter(College.name == trainee_info["college"]).first()
         if college:
@@ -1832,6 +1895,11 @@ def skills_record_pdf_export(
                     dean_name = college_admin.full_name or college_admin.username
             
             delegate_name = college.vp_students_name or ""
+            
+            # جلب التوقيعات من بيانات الكلية
+            dean_sign_url = college.dean_sign_path if college.dean_sign_path else "/static/blank.png"
+            vp_sign_url = college.vp_students_sign_path if college.vp_students_sign_path else "/static/blank.png"
+            stamp_url = college.students_affairs_stamp_path if college.students_affairs_stamp_path else "/static/blank.png"
     
     # جلب بيانات القسم للحصول على اسم رئيس القسم
     if trainee_info["department"]:
@@ -1843,6 +1911,7 @@ def skills_record_pdf_export(
             else:
                 dept_head_name = dept.hod_name or ""
 
+
     # تحضير البيانات للـ template
     payload = {
         "trainee": trainee_info,
@@ -1852,6 +1921,9 @@ def skills_record_pdf_export(
         "dean_name": dean_name,
         "delegate_name": delegate_name,
         "dept_head_name": dept_head_name,
+        "dean_sign_url": dean_sign_url,
+        "vp_sign_url": vp_sign_url,
+        "stamp_url": stamp_url,
         "font_ready_css": font_ready_css,
         "shape": _shape_ar,
     }

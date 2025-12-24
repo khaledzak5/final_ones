@@ -36,7 +36,7 @@
   .sheet{
     box-sizing:border-box; width:297mm; height:210mm; overflow:hidden;
     border:8px solid var(--blue); box-shadow:0 0 0 3px #fff inset, 0 0 0 6px var(--green) inset;
-    padding:2mm 10mm 10mm;
+    padding:2mm 10mm 4mm;
     display:grid;
     grid-template-rows:
       auto  /* الهيدر */
@@ -48,7 +48,7 @@
       auto  /* نص قد حضر */
       auto  /* التواقيع + ختم */
       1fr;  /* الفوتر - يملأ الباقي */
-    row-gap: 3mm;
+    row-gap: 2mm;
     color:var(--ink);
   }
 
@@ -80,6 +80,8 @@
     margin-right:40mm; /* إزاحة للنص الإنجليزي */
   }
   .hdr .logo{ width:40mm; height:auto; object-fit:contain; display:block; margin-inline:auto; }
+  /* Top centered logo for course completion certificate */
+  .top-logo{ width:32mm; height:auto; object-fit:contain; display:block; margin:12mm auto -18mm; }
 
   .rule{ height:0; border-top:2px solid var(--blue); position:relative; }
   .rule::after{ content:""; position:absolute; left:25%; right:25%; top:-2px; height:2px; background:var(--green); }
@@ -141,13 +143,14 @@
     align-items:flex-end;
     justify-items:center;
     column-gap:0;
-    height:100%;
+    height:auto;
+    padding-bottom:2mm;
   }
 
   .f-left{
     grid-column:3; justify-self:end; display:flex; align-items:flex-end;
   }
-  .barcode{ width:16mm; height:16mm; object-fit:contain; border:1px solid var(--rule); padding:1mm; background:#fff; }
+  .barcode{ width:16mm; height:16mm; object-fit:contain; border:1px solid var(--rule); padding:1mm; background:#fff; margin-top:-6mm; }
 
   .f-mid{
     grid-column:2; justify-self:center; text-align:center;
@@ -181,13 +184,20 @@
 <body>
   <div class="sheet">
     <!-- Header -->
+      <!-- Top centered logo -->
+    <div style="text-align:center; margin-top:2mm;">
+      {% if logo_src %}
+        <img class="top-logo" src="{{ logo_src }}" alt="Logo">
+      {% endif %}
+    </div>
+
     <div class="hdr">
       <div class="ar">
         <div>المملكة العربية السعودية</div>
         <div>المؤسسة العامة للتدريب التقني والمهني</div>
         <div>{{ college_name }}</div>
       </div>
-      <img class="logo" src="/static/images/logo.png" alt="Logo">
+      <div style="width:40mm;"></div>
       <div class="en">
         <div>Kingdom of Saudi Arabia</div>
         <div>Technical & Vocational Training Corporation</div>
